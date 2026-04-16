@@ -1,2 +1,0 @@
-from zapbot import StateMachine
-
