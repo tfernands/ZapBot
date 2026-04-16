@@ -93,6 +93,45 @@ with ZapAPI(
 
 O construtor de `ZapAPI` nao abre o browser por conta propria. Use `with ZapAPI(...)`, `api.start()` ou `ZapAPI.connect(...)`.
 
+## 7. Suba o servidor MCP com notificacao pronta
+
+Se voce quiser usar este repositorio como um servidor MCP e disparar um aviso de conclusao no fim de uma tarefa, inicie assim:
+
+```bash
+uv run whats-mcp \
+  --notify-chat "Eu" \
+  --notify-message "Refatoracao concluida."
+```
+
+Depois disso, a ferramenta MCP `notify_completion` pode ser chamada sem argumentos.
+Se a sessao ainda nao existir, o servidor abre o browser visivel temporariamente para o QR Code e depois volta ao modo headless padrao.
+No cliente MCP, prefira registrar esse servidor com o nome `whatsapp`.
+
+Se quiser operar com whitelist e aprovacao explicita antes de enviar mensagens, suba o servidor assim:
+
+```bash
+uv run whats-mcp \
+  --allow-tool messages_send_text \
+  --allow-tool notify_completion \
+  --write-chat-allowlist "Eu,Equipe" \
+  --read-chat-allowlist "Equipe" \
+  --require-approval-for messages_send_text \
+  --require-approval-for notify_completion \
+  --deny-unfiltered-inbox-poll true \
+  --deny-fuzzy-chat-match true
+```
+
+Nesse modo, as ferramentas marcadas em `--require-approval-for` precisam receber este bloco no payload:
+
+```json
+{
+  "approval": {
+    "confirm": true,
+    "reason": "acao autorizada"
+  }
+}
+```
+
 ## Fluxo recomendado para um novo usuario
 
 1. `uv sync`

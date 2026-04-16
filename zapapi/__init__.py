@@ -28,6 +28,8 @@ from .services import AuthService, ChatService, InboxService, MessageService
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
+__version__ = "0.1.0"
+
 __all__ = [
     "AuthenticationRequiredException",
     "AuthService",
@@ -51,4 +53,5 @@ __all__ = [
     "ZapAPI",
     "ZapAPIConfig",
     "WhatsAppWebTimeoutException",
+    "__version__",
 ]

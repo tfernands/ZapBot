@@ -12,6 +12,9 @@ dependencies = [
     "playwright",
 ]
 
+[project.scripts]
+whats-mcp = "zapapi.mcp.server:main"
+
 [project.optional-dependencies]
 notebook = [
     "ipykernel",

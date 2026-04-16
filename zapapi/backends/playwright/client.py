@@ -7,7 +7,15 @@ from typing import Sequence
 
 from ...config import ZapAPIConfig
 from ...errors import ChatNotFoundException, NoOpenChatException, WhatsAppWebTimeoutException
-from ...models import AuthStatus, ChatMessage, ChatRef, ChatSummary, HistoryPage, PollResult
+from ...models import (
+    AuthStatus,
+    ChatMessage,
+    ChatRef,
+    ChatSummary,
+    HistoryPage,
+    MessageDirection,
+    PollResult,
+)
 from ...state import InboxState
 from .parser import WhatsAppParser
 from .selectors import (
@@ -123,7 +131,17 @@ class PlaywrightZapAPI:
         return chat
 
     def send_text(self, chat: str | ChatRef, text: str) -> ChatRef:
+        self.ensure_ready(timeout_ms=self.config.launch_timeout_ms)
         chat_ref = self.select_chat(chat)
+        self._scroll_to_bottom()
+        visible_before_send = self._stable_visible_messages(chat_ref)
+        visible_message_ids = {message.id for message in visible_before_send}
+        normalized_text = self.parser._normalize_message_text(text)
+        matching_messages_before_send = sum(
+            1
+            for message in visible_before_send
+            if message.direction is MessageDirection.OUTBOUND and message.text == normalized_text
+        )
         composer = self.session.require_visible_locator(
             MESSAGE_COMPOSER_SELECTORS,
             timeout_ms=self.config.action_timeout_ms,
@@ -144,6 +162,12 @@ class PlaywrightZapAPI:
             send_button.click()
         else:
             page.keyboard.press("Enter")
+        self._wait_for_outbound_text(
+            chat_ref,
+            text=text,
+            before_ids=visible_message_ids,
+            before_match_count=matching_messages_before_send,
+        )
         return chat_ref
 
     def send_image(self, chat: str | ChatRef, image_path: str) -> ChatRef:
@@ -297,6 +321,49 @@ class PlaywrightZapAPI:
             self.session.require_page().wait_for_timeout(self.config.poll_interval_ms)
 
         return None
+
+    def _wait_for_outbound_text(
+        self,
+        chat: ChatRef,
+        *,
+        text: str,
+        before_ids: set[str],
+        before_match_count: int,
+    ) -> None:
+        expected_text = self.parser._normalize_message_text(text)
+        deadline = time.monotonic() + (self.config.action_timeout_ms / 1000)
+
+        while time.monotonic() < deadline:
+            visible_messages = self._extract_visible_messages(chat)
+            matching_messages = [
+                message
+                for message in visible_messages
+                if message.direction is MessageDirection.OUTBOUND and message.text == expected_text
+            ]
+            if len(matching_messages) > before_match_count:
+                return
+            if any(message.id not in before_ids for message in matching_messages):
+                return
+            self.session.require_page().wait_for_timeout(self.config.poll_interval_ms)
+
+        raise WhatsAppWebTimeoutException(
+            "A mensagem nao apareceu na conversa apos o envio."
+        )
+
+    def _stable_visible_messages(self, chat: ChatRef) -> list[ChatMessage]:
+        deadline = time.monotonic() + (self.config.action_timeout_ms / 1000)
+        previous_ids: list[str] | None = None
+        last_messages: list[ChatMessage] = []
+
+        while time.monotonic() < deadline:
+            last_messages = self._extract_visible_messages(chat)
+            current_ids = [message.id for message in last_messages]
+            if current_ids == previous_ids:
+                return last_messages
+            previous_ids = current_ids
+            self.session.require_page().wait_for_timeout(self.config.poll_interval_ms)
+
+        return last_messages
 
     def _scroll_to_bottom(self) -> None:
         container = self._message_container()
