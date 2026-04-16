@@ -1,5 +1,8 @@
 userdata
 venv
+.venv
+.vscode
+*.egg-info/
 *.exe
 env.py
 __pycache__

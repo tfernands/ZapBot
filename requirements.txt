@@ -1,5 +1,3 @@
-# ZAPBOT DEPENDECIES
-
-selenium
-ipykernel
-pyyaml
+# Legacy compatibility file.
+# The project is now managed through pyproject.toml + uv.
+playwright
