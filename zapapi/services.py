@@ -4,7 +4,7 @@ import time
 from typing import Iterator, Sequence
 
 from .backends.playwright import PlaywrightZapAPI
-from .models import AuthStatus, ChatRef, ChatSummary, HistoryPage, PollResult
+from .models import AuthStatus, ChatRef, ChatSummary, HistoryPage, InboxEntry, PollResult, SearchHit
 
 
 class AuthService:
@@ -27,8 +27,13 @@ class ChatService:
     def current(self) -> ChatRef:
         return self._client.current_chat()
 
-    def list(self, unread_only: bool = False, limit: int | None = None) -> list[ChatSummary]:
-        return self._client.list_chats(unread_only=unread_only, limit=limit)
+    def list(
+        self,
+        unread_only: bool = False,
+        limit: int | None = None,
+        scroll_steps: int = 0,
+    ) -> list[ChatSummary]:
+        return self._client.list_chats(unread_only=unread_only, limit=limit, scroll_steps=scroll_steps)
 
     def get(self, target: str | ChatRef, exact_match: bool = True) -> ChatRef:
         return self._client.select_chat(target, exact_match=exact_match)
@@ -65,6 +70,33 @@ class InboxService:
 
     def __init__(self, client: PlaywrightZapAPI) -> None:
         self._client = client
+
+    def inbox(
+        self,
+        *,
+        chats: Sequence[str | ChatRef] | None = None,
+        limit_per_chat: int = 10,
+        scroll_steps: int = 3,
+        max_chats: int | None = None,
+    ) -> list[InboxEntry]:
+        return self._client.inbox(
+            chats=chats, limit_per_chat=limit_per_chat,
+            scroll_steps=scroll_steps, max_chats=max_chats,
+        )
+
+    def search(
+        self,
+        query: str,
+        *,
+        chats: Sequence[str | ChatRef] | None = None,
+        limit: int = 20,
+        scroll_steps: int = 3,
+        max_chats: int | None = None,
+    ) -> list[SearchHit]:
+        return self._client.search_messages(
+            query, chats=chats, limit=limit,
+            scroll_steps=scroll_steps, max_chats=max_chats,
+        )
 
     def poll(
         self,

@@ -13,8 +13,11 @@ from ...models import (
     ChatRef,
     ChatSummary,
     HistoryPage,
+    InboxEntry,
     MessageDirection,
     PollResult,
+    SearchHit,
+    SkippedChat,
 )
 from ...state import InboxState
 from .parser import WhatsAppParser
@@ -35,7 +38,7 @@ from .selectors import (
 from .session import PlaywrightSession
 
 
-class PlaywrightZapAPI:
+class SyncPlaywrightZapAPI:
     _MESSAGE_CONTAINER_MARKER = "data-zapapi-message-container"
 
     def __init__(
@@ -54,7 +57,7 @@ class PlaywrightZapAPI:
         self.state = state or InboxState()
         self.parser = parser
 
-    def start(self) -> "PlaywrightZapAPI":
+    def start(self) -> "SyncPlaywrightZapAPI":
         self.session.start()
         return self
 
@@ -77,17 +80,47 @@ class PlaywrightZapAPI:
         name = locator.inner_text().strip()
         return ChatRef(name=name)
 
-    def list_chats(self, unread_only: bool = False, limit: int | None = None) -> list[ChatSummary]:
+    def list_chats(
+        self,
+        unread_only: bool = False,
+        limit: int | None = None,
+        scroll_steps: int = 0,
+    ) -> list[ChatSummary]:
+        seen_names: set[str] = set()
         chats: list[ChatSummary] = []
-        for row in self.session.locators_for_any(CHAT_LIST_ITEM_SELECTORS):
-            chat = self.parser.parse_chat_summary(self.session.safe_evaluate(row, CHAT_SUMMARY_EVALUATOR))
-            if chat is None:
-                continue
-            if unread_only and chat.unread_count <= 0:
-                continue
-            chats.append(chat)
-            if limit is not None and len(chats) >= limit:
-                break
+
+        def _collect_visible() -> None:
+            for row in self.session.locators_for_any(CHAT_LIST_ITEM_SELECTORS):
+                chat = self.parser.parse_chat_summary(self.session.safe_evaluate(row, CHAT_SUMMARY_EVALUATOR))
+                if chat is None:
+                    continue
+                normalized = chat.name.casefold()
+                if normalized in seen_names:
+                    continue
+                if unread_only and chat.unread_count <= 0:
+                    continue
+                seen_names.add(normalized)
+                chats.append(chat)
+                if limit is not None and len(chats) >= limit:
+                    return
+
+        _collect_visible()
+
+        if scroll_steps > 0 and (limit is None or len(chats) < limit):
+            sidebar = self.session.find_visible_locator(
+                ("#pane-side",),
+                timeout_ms=self.config.action_timeout_ms,
+            )
+            if sidebar is not None:
+                for _ in range(scroll_steps):
+                    sidebar.evaluate(
+                        "node => { node.scrollTop += node.clientHeight * 0.8; }"
+                    )
+                    self.session.sleep_ui_tick()
+                    _collect_visible()
+                    if limit is not None and len(chats) >= limit:
+                        break
+
         return chats
 
     def select_chat(self, target: str | ChatRef, exact_match: bool = True) -> ChatRef:
@@ -262,13 +295,18 @@ class PlaywrightZapAPI:
         targets = list(chats) if chats is not None else self.list_chats(unread_only=True)
         scanned_chats: list[ChatRef] = []
         new_messages: list[ChatMessage] = []
+        skipped: list[SkippedChat] = []
 
         for target in targets:
             try:
                 chat_ref = self.select_chat(target)
                 scanned_chats.append(chat_ref)
                 page = self.history(chat_ref, limit=limit_per_chat)
-            except (ChatNotFoundException, NoOpenChatException):
+            except ChatNotFoundException:
+                skipped.append(SkippedChat(chat=target, reason="Chat nao encontrado na sidebar ou busca."))
+                continue
+            except NoOpenChatException:
+                skipped.append(SkippedChat(chat=target, reason="Nao foi possivel abrir o chat."))
                 continue
 
             new_messages.extend(
@@ -278,7 +316,148 @@ class PlaywrightZapAPI:
         return PollResult(
             chats=tuple(scanned_chats),
             messages=tuple(new_messages),
+            skipped=tuple(skipped),
         )
+
+    def inbox(
+        self,
+        *,
+        chats: Sequence[str | ChatRef] | None = None,
+        limit_per_chat: int = 10,
+        scroll_steps: int = 3,
+        max_chats: int | None = None,
+    ) -> list[InboxEntry]:
+        """Unified inbox: list chats with their recent messages in one pass."""
+        t0 = time.monotonic()
+
+        if chats is not None:
+            targets: list[str | ChatRef] = list(chats)
+            self.logger.info("inbox: %d chat(s) explicito(s) solicitado(s)", len(targets))
+        else:
+            targets = self.list_chats(scroll_steps=scroll_steps)
+            self.logger.info(
+                "inbox: list_chats retornou %d chat(s) (scroll_steps=%d) em %.1fs",
+                len(targets), scroll_steps, time.monotonic() - t0,
+            )
+
+        if max_chats is not None and len(targets) > max_chats:
+            self.logger.info(
+                "inbox: limitando de %d para %d chats (max_chats=%d)",
+                len(targets), max_chats, max_chats,
+            )
+            targets = targets[:max_chats]
+
+        entries: list[InboxEntry] = []
+        for i, target in enumerate(targets, 1):
+            chat_name = target.name if hasattr(target, "name") else str(target)
+            t_chat = time.monotonic()
+            summary = target if isinstance(target, ChatSummary) else None
+            try:
+                chat_ref = self.select_chat(target)
+                page = self.history(chat_ref, limit=limit_per_chat)
+                if summary is None:
+                    summary = ChatSummary(
+                        name=chat_ref.name,
+                        key=chat_ref.key,
+                        preview=page.messages[-1].text if page.messages else None,
+                        unread_count=0,
+                    )
+                entries.append(InboxEntry(chat=summary, messages=page.messages))
+                self.logger.debug(
+                    "inbox: [%d/%d] '%s' — %d msg em %.1fs",
+                    i, len(targets), chat_name, len(page.messages), time.monotonic() - t_chat,
+                )
+            except ChatNotFoundException:
+                if summary is None:
+                    name = target.name if isinstance(target, ChatRef) else str(target)
+                    summary = ChatSummary(name=name)
+                entries.append(InboxEntry(
+                    chat=summary,
+                    messages=(),
+                    skipped=True,
+                    skip_reason="Chat nao encontrado na sidebar ou busca.",
+                ))
+                self.logger.warning(
+                    "inbox: [%d/%d] '%s' — skipped (nao encontrado) em %.1fs",
+                    i, len(targets), chat_name, time.monotonic() - t_chat,
+                )
+            except NoOpenChatException:
+                if summary is None:
+                    name = target.name if isinstance(target, ChatRef) else str(target)
+                    summary = ChatSummary(name=name)
+                entries.append(InboxEntry(
+                    chat=summary,
+                    messages=(),
+                    skipped=True,
+                    skip_reason="Nao foi possivel abrir o chat.",
+                ))
+                self.logger.warning(
+                    "inbox: [%d/%d] '%s' — skipped (nao abriu) em %.1fs",
+                    i, len(targets), chat_name, time.monotonic() - t_chat,
+                )
+
+        self.logger.info(
+            "inbox: concluido — %d entries (%d skipped) em %.1fs total",
+            len(entries),
+            sum(1 for e in entries if e.skipped),
+            time.monotonic() - t0,
+        )
+        return entries
+
+    def search_messages(
+        self,
+        query: str,
+        *,
+        chats: Sequence[str | ChatRef] | None = None,
+        limit: int = 20,
+        scroll_steps: int = 3,
+        max_chats: int | None = None,
+    ) -> list[SearchHit]:
+        """Search for messages containing query text across one or more chats."""
+        t0 = time.monotonic()
+
+        if chats is not None:
+            targets: list[str | ChatRef] = list(chats)
+        else:
+            targets = self.list_chats(scroll_steps=scroll_steps)
+
+        if max_chats is not None and len(targets) > max_chats:
+            self.logger.info(
+                "search: limitando de %d para %d chats (max_chats=%d)",
+                len(targets), max_chats, max_chats,
+            )
+            targets = targets[:max_chats]
+
+        self.logger.info("search: query='%s' em %d chat(s), limit=%d", query, len(targets), limit)
+
+        query_lower = query.casefold()
+        hits: list[SearchHit] = []
+
+        for i, target in enumerate(targets, 1):
+            chat_name = target.name if hasattr(target, "name") else str(target)
+            try:
+                chat_ref = self.select_chat(target)
+                page = self.history(chat_ref, limit=50)
+                before_count = len(hits)
+                for msg in page.messages:
+                    if query_lower in msg.text.casefold():
+                        hits.append(SearchHit(message=msg, chat=chat_ref))
+                        if len(hits) >= limit:
+                            self.logger.info(
+                                "search: limite de %d hits atingido em [%d/%d] '%s' (%.1fs total)",
+                                limit, i, len(targets), chat_name, time.monotonic() - t0,
+                            )
+                            return hits
+                found = len(hits) - before_count
+                if found:
+                    self.logger.debug("search: [%d/%d] '%s' — %d hit(s)", i, len(targets), chat_name, found)
+            except (ChatNotFoundException, NoOpenChatException):
+                self.logger.warning("search: [%d/%d] '%s' — skipped", i, len(targets), chat_name)
+                continue
+
+        self.logger.info("search: concluido — %d hit(s) em %.1fs", len(hits), time.monotonic() - t0)
+
+        return hits
 
     def _extract_visible_messages(self, chat: ChatRef) -> list[ChatMessage]:
         messages: list[ChatMessage] = []
@@ -481,3 +660,28 @@ class PlaywrightZapAPI:
         if before is not None:
             return oldest_page_index > 0 or not exhausted
         return oldest_page_index > 0 or not exhausted
+
+
+from .threadsafe import ThreadBoundPlaywrightZapAPI
+
+
+class PlaywrightZapAPI(ThreadBoundPlaywrightZapAPI):
+    """Thread-safe public facade over the sync Playwright implementation."""
+
+    def __init__(
+        self,
+        config: ZapAPIConfig,
+        *,
+        session: PlaywrightSession | None = None,
+        state: InboxState | None = None,
+        parser: type[WhatsAppParser] = WhatsAppParser,
+    ) -> None:
+        super().__init__(
+            config=config,
+            client_factory=lambda: SyncPlaywrightZapAPI(
+                config=config,
+                session=session,
+                state=state,
+                parser=parser,
+            ),
+        )

@@ -23,6 +23,9 @@ from .models import (
     MessageType,
     PollResult,
     ReplyReference,
+    SearchHit,
+    SkippedChat,
+    InboxEntry,
 )
 from .services import AuthService, ChatService, InboxService, MessageService
 
@@ -50,6 +53,9 @@ __all__ = [
     "NoOpenChatException",
     "PollResult",
     "ReplyReference",
+    "SearchHit",
+    "SkippedChat",
+    "InboxEntry",
     "ZapAPI",
     "ZapAPIConfig",
     "WhatsAppWebTimeoutException",

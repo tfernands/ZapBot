@@ -83,6 +83,29 @@ class HistoryPage:
 
 
 @dataclass(frozen=True, slots=True)
+class SkippedChat:
+    chat: str | ChatRef
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class PollResult:
     chats: tuple[ChatRef, ...]
     messages: tuple[ChatMessage, ...]
+    skipped: tuple[SkippedChat, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class InboxEntry:
+    """A chat with its recent messages, used by the unified inbox view."""
+    chat: ChatSummary
+    messages: tuple[ChatMessage, ...]
+    skipped: bool = False
+    skip_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SearchHit:
+    """A message that matched a search query."""
+    message: ChatMessage
+    chat: ChatRef

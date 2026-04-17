@@ -57,6 +57,7 @@ with ZapAPI(
 ## Observacoes
 
 - `ZapAPI(...)` apenas configura a sessao. Use `with ZapAPI(...)`, `api.start()` ou `ZapAPI.connect(...)` para abrir o browser.
+- O `ZapAPI` isola o backend sync do Playwright em uma thread dedicada, entao ele pode ser chamado de runtimes com `asyncio` ativo sem disparar o erro `Playwright Sync API inside the asyncio loop`.
 - `api.auth.status()` informa `loading`, `qr_required` ou `ready`.
 - `api.messages.send_image(chat, image_path)` envia imagem pelo fluxo de anexo do WhatsApp Web.
 - `api.messages.history(..., before=cursor)` pagina historico usando o `cursor` retornado.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from zapapi.backends.playwright.client import PlaywrightZapAPI
+from zapapi.backends.playwright.client import SyncPlaywrightZapAPI
 from zapapi.config import ZapAPIConfig
 from zapapi.errors import WhatsAppWebTimeoutException
 from zapapi.models import AuthState, AuthStatus, ChatRef, ChatTextMessage, MessageDirection
@@ -66,7 +66,7 @@ class FakeSession:
         return self.send_button
 
 
-class ScriptedPlaywrightZapAPI(PlaywrightZapAPI):
+class ScriptedPlaywrightZapAPI(SyncPlaywrightZapAPI):
     def __init__(self, *, config: ZapAPIConfig, session: FakeSession, message_batches: list[list[ChatTextMessage]]) -> None:
         super().__init__(config=config, session=session)
         self._message_batches = [list(batch) for batch in message_batches]

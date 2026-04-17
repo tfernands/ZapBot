@@ -83,13 +83,20 @@ node => {
       .replace(/\\u200f/g, "")
       .trim();
 
+  // Priority 1: the title attribute of the first span[title] — WhatsApp stores
+  // the full, untruncated chat name here even when the visible text is clipped
+  // by CSS overflow.  This fixes garbled/truncated names in the sidebar.
+  const titleSpan = node.querySelector("span[title]");
+  const titleAttr = titleSpan ? clean(titleSpan.getAttribute("title")) : "";
+
+  // Priority 2: fallback to previous heuristic scanning all candidates.
   const candidates = Array.from(
     node.querySelectorAll("span[title], span[dir='auto'], div[dir='auto'], [title]")
   )
     .map((element) => clean(element.getAttribute("title") || element.textContent))
     .filter(Boolean);
 
-  const name = candidates[0] || "";
+  const name = titleAttr || candidates[0] || "";
   const preview = candidates.find((value) => value !== name) || "";
   const innerText = clean(node.innerText);
   const unreadMatch = (clean(node.getAttribute("aria-label")) + " " + innerText).match(

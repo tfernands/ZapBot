@@ -145,4 +145,5 @@ Nesse modo, as ferramentas marcadas em `--require-approval-for` precisam receber
 - Se o browser abrir mas o WhatsApp nao autenticar, repita o bootstrap com `headless=False`.
 - Se o exemplo headless falhar com autenticacao, rode `uv run python examples/playwright_bootstrap.py` e escaneie o QR Code.
 - Se a sessao expirar, apague `./userdata/profile/wpp-playwright` e rode o bootstrap de novo.
+- O `ZapAPI` encapsula o backend sync do Playwright em uma thread dedicada para evitar falha quando o host do MCP roda com `asyncio`.
 - Se quiser reproduzir exatamente as versoes travadas do repositório, use `uv sync --frozen`.
