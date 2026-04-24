@@ -20,11 +20,6 @@ SEARCH_BOX_SELECTORS = (
     "#side [contenteditable='true'][aria-label*='Search']",
     "#side [contenteditable='true'][title*='Pesquisar']",
     "#side [contenteditable='true'][title*='Search']",
-    "div[role='textbox'][aria-label='Pesquisar ou começar uma nova conversa']",
-    "div[role='textbox'][aria-label='Search input textbox']",
-    "div[role='textbox'][aria-label='Search or start a new chat']",
-    "xpath=//div[@data-tab='3' and @role='textbox']",
-    "xpath=//div[@role='textbox' and @contenteditable='true']",
     "xpath=//div[@id='side']//div[@role='textbox' and @data-tab='3']",
     "xpath=//div[@id='side']//*[@contenteditable='true' and (contains(@aria-label, 'Pesquisar') or contains(@aria-label, 'Search') or contains(@title, 'Pesquisar') or contains(@title, 'Search'))]",
 )
