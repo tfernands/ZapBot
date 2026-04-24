@@ -38,6 +38,15 @@ class ChatService:
     def get(self, target: str | ChatRef, exact_match: bool = True) -> ChatRef:
         return self._client.select_chat(target, exact_match=exact_match)
 
+    def find(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        scroll_steps: int = 2,
+    ) -> list[ChatSummary]:
+        return self._client.find_chats(query, limit=limit, scroll_steps=scroll_steps)
+
 
 class MessageService:
 

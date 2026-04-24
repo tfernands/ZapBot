@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from zapapi.backends.playwright.client import SyncPlaywrightZapAPI
+from zapapi.backends.playwright.parser import WhatsAppParser
 from zapapi.config import ZapAPIConfig
 from zapapi.errors import WhatsAppWebTimeoutException
 from zapapi.models import AuthState, AuthStatus, ChatRef, ChatTextMessage, MessageDirection
@@ -64,6 +65,23 @@ class FakeSession:
 
     def find_visible_locator(self, selectors, *, timeout_ms: int):
         return self.send_button
+
+
+class FakeSearchSession(FakeSession):
+    def __init__(self, *, inside_sidebar: bool, metadata: dict[str, str] | None = None) -> None:
+        super().__init__()
+        self.search_box = FakeLocator()
+        self.inside_sidebar = inside_sidebar
+        self.metadata = metadata or {}
+
+    def find_visible_locator(self, selectors, *, timeout_ms: int):
+        return self.search_box
+
+    def locator_matches_ancestor(self, locator, selector: str) -> bool:
+        return locator is self.search_box and selector == "#side" and self.inside_sidebar
+
+    def locator_text_metadata(self, locator) -> dict[str, str]:
+        return self.metadata if locator is self.search_box else {}
 
 
 class ScriptedPlaywrightZapAPI(SyncPlaywrightZapAPI):
@@ -142,6 +160,44 @@ class PlaywrightClientSendTextTests(unittest.TestCase):
 
         with self.assertRaises(WhatsAppWebTimeoutException):
             client.send_text(chat, "teste que nao aparece")
+
+
+class PlaywrightClientSearchBoxTests(unittest.TestCase):
+    def _config(self) -> ZapAPIConfig:
+        return ZapAPIConfig.from_kwargs(
+            user_data_dir="./userdata/profile/wpp-playwright",
+            action_timeout_ms=1,
+            poll_interval_seconds=0.01,
+        )
+
+    def test_sidebar_search_box_accepts_locator_inside_sidebar(self) -> None:
+        session = FakeSearchSession(inside_sidebar=True)
+        client = SyncPlaywrightZapAPI(config=self._config(), session=session)
+
+        self.assertIs(client._sidebar_search_box(), session.search_box)
+
+    def test_sidebar_search_box_rejects_locator_outside_sidebar(self) -> None:
+        session = FakeSearchSession(inside_sidebar=False)
+        client = SyncPlaywrightZapAPI(config=self._config(), session=session)
+
+        self.assertIsNone(client._sidebar_search_box())
+
+    def test_sidebar_search_box_accepts_search_label_outside_legacy_side(self) -> None:
+        session = FakeSearchSession(
+            inside_sidebar=False,
+            metadata={"ariaLabel": "Pesquisar ou começar uma nova conversa"},
+        )
+        client = SyncPlaywrightZapAPI(config=self._config(), session=session)
+
+        self.assertIs(client._sidebar_search_box(), session.search_box)
+
+
+class WhatsAppParserChatMatchTests(unittest.TestCase):
+    def test_chat_match_key_ignores_accents_and_emoji(self) -> None:
+        self.assertEqual(
+            WhatsAppParser.chat_match_key("Vitória 💚"),
+            WhatsAppParser.chat_match_key("vitoria"),
+        )
 
 
 if __name__ == "__main__":

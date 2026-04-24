@@ -15,6 +15,11 @@ DEFAULT_BROWSER_ARGS = (
 )
 DEFAULT_POLL_INTERVAL_MS = 250
 DEFAULT_BASE_URL = "https://web.whatsapp.com/"
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +29,7 @@ class ZapAPIConfig:
     debug_level: int = logging.INFO
     browser_args: tuple[str, ...] = DEFAULT_BROWSER_ARGS
     base_url: str = DEFAULT_BASE_URL
+    user_agent: str = DEFAULT_USER_AGENT
     launch_timeout_ms: int = 30000
     action_timeout_ms: int = 5000
     poll_interval_ms: int = 500
@@ -38,6 +44,7 @@ class ZapAPIConfig:
         debug_level: int = logging.INFO,
         browser_args: Iterable[str] | None = None,
         base_url: str = DEFAULT_BASE_URL,
+        user_agent: str = DEFAULT_USER_AGENT,
         launch_timeout_ms: int = 30000,
         action_timeout_ms: int = 5000,
         poll_interval_seconds: float = 0.5,
@@ -49,6 +56,7 @@ class ZapAPIConfig:
             debug_level=debug_level,
             browser_args=tuple(browser_args or DEFAULT_BROWSER_ARGS),
             base_url=base_url,
+            user_agent=user_agent,
             launch_timeout_ms=launch_timeout_ms,
             action_timeout_ms=action_timeout_ms,
             poll_interval_ms=max(int(poll_interval_seconds * 1000), DEFAULT_POLL_INTERVAL_MS),

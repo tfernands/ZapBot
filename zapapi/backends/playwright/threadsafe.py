@@ -75,6 +75,20 @@ class ThreadBoundPlaywrightZapAPI:
     def select_chat(self, target: str | ChatRef, exact_match: bool = True) -> ChatRef:
         return self._invoke("select_chat", target, exact_match=exact_match)
 
+    def find_chats(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        scroll_steps: int = 2,
+    ) -> list[ChatSummary]:
+        return self._invoke(
+            "find_chats",
+            query,
+            limit=limit,
+            scroll_steps=scroll_steps,
+        )
+
     def send_text(self, chat: str | ChatRef, text: str) -> ChatRef:
         return self._invoke("send_text", chat, text)
 

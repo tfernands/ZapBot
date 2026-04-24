@@ -44,14 +44,24 @@ class PlaywrightSession:
 
         self._playwright = sync_playwright().start()
         desktop_chrome = self._playwright.devices["Desktop Chrome"]
-        self.context = self._playwright.chromium.launch_persistent_context(
-            user_data_dir=str(self.config.user_data_dir),
-            headless=self.config.headless,
-            args=list(self.config.browser_args),
-            slow_mo=self.config.slow_mo,
-            user_agent=desktop_chrome["user_agent"],
-            viewport=desktop_chrome["viewport"],
-        )
+        try:
+            self.context = self._playwright.chromium.launch_persistent_context(
+                user_data_dir=str(self.config.user_data_dir),
+                headless=self.config.headless,
+                args=list(self.config.browser_args),
+                slow_mo=self.config.slow_mo,
+                user_agent=self.config.user_agent,
+                viewport=desktop_chrome["viewport"],
+            )
+        except PlaywrightError as exc:
+            self._stop_playwright()
+            message = str(exc)
+            if "ProcessSingleton" in message or "SingletonLock" in message:
+                raise WhatsAppWebTimeoutException(
+                    "Perfil do WhatsApp Web ja esta em uso por outro Chromium/Playwright. "
+                    "Feche a janela antiga do WhatsApp MCP e tente novamente."
+                ) from exc
+            raise
         self.context.set_default_timeout(self.config.action_timeout_ms)
         self.context.set_default_navigation_timeout(self.config.launch_timeout_ms)
         self.context.add_init_script(
@@ -76,9 +86,20 @@ class PlaywrightSession:
 
     def close(self) -> None:
         if self.context is not None:
-            self.context.close()
+            try:
+                self.context.close()
+            except PlaywrightError:
+                self.logger.debug("Contexto Playwright ja estava fechado.", exc_info=True)
+        self._stop_playwright()
+        self.context = None
+        self.page = None
+
+    def _stop_playwright(self) -> None:
         if self._playwright is not None:
-            self._playwright.stop()
+            try:
+                self._playwright.stop()
+            except PlaywrightError:
+                self.logger.debug("Playwright ja estava parado.", exc_info=True)
         self.context = None
         self.page = None
         self._playwright = None
@@ -176,6 +197,25 @@ class PlaywrightSession:
             return None
         return payload if isinstance(payload, dict) else None
 
+    def locator_matches_ancestor(self, locator: Locator, selector: str) -> bool:
+        try:
+            return bool(locator.evaluate("(node, selector) => Boolean(node.closest(selector))", selector))
+        except PlaywrightError:
+            return False
+
+    def locator_text_metadata(self, locator: Locator) -> dict[str, str]:
+        try:
+            payload = locator.evaluate(
+                """node => ({
+                    ariaLabel: node.getAttribute('aria-label') || '',
+                    title: node.getAttribute('title') || '',
+                    role: node.getAttribute('role') || '',
+                })"""
+            )
+        except PlaywrightError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     def clear_editable(self, locator: Locator) -> None:
         try:
             locator.fill("")
@@ -183,7 +223,10 @@ class PlaywrightSession:
         except PlaywrightError:
             pass
 
-        locator.click()
+        try:
+            locator.click(timeout=1000)
+        except PlaywrightError:
+            self.logger.debug("Nao foi possivel clicar no campo editavel antes de limpar.", exc_info=True)
         page = self.require_page()
         for shortcut in ("Meta+A", "Control+A"):
             try:
