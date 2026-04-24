@@ -40,6 +40,7 @@ from .session import PlaywrightSession
 
 class SyncPlaywrightZapAPI:
     _MESSAGE_CONTAINER_MARKER = "data-zapapi-message-container"
+    _MAX_CHAT_ROW_SCAN = 80
 
     def __init__(
         self,
@@ -86,6 +87,7 @@ class SyncPlaywrightZapAPI:
         limit: int | None = None,
         scroll_steps: int = 0,
     ) -> list[ChatSummary]:
+        self.ensure_ready(timeout_ms=self.config.launch_timeout_ms)
         seen_names: set[str] = set()
         chats: list[ChatSummary] = []
 
@@ -155,10 +157,7 @@ class SyncPlaywrightZapAPI:
             if len(matches) >= limit:
                 return matches
 
-        search_box = self.session.find_visible_locator(
-            SEARCH_BOX_SELECTORS,
-            timeout_ms=self.config.action_timeout_ms,
-        )
+        search_box = self._sidebar_search_box()
         if search_box is None:
             return matches
 
@@ -186,6 +185,7 @@ class SyncPlaywrightZapAPI:
         return matches
 
     def select_chat(self, target: str | ChatRef, exact_match: bool = True) -> ChatRef:
+        self.ensure_ready(timeout_ms=self.config.launch_timeout_ms)
         target_name = target.name if isinstance(target, ChatRef) else target
         target_key = self.parser.chat_match_key(target_name)
 
@@ -207,10 +207,11 @@ class SyncPlaywrightZapAPI:
                 raise ChatNotFoundException(target_name, message=f"Chat aberto diverge do alvo: {chat.name}")
             return chat
 
-        search_box = self.session.require_visible_locator(
-            SEARCH_BOX_SELECTORS,
-            timeout_ms=self.config.action_timeout_ms,
-        )
+        search_box = self._sidebar_search_box()
+        if search_box is None:
+            raise WhatsAppWebTimeoutException(
+                "Nao foi possivel localizar o campo de busca da sidebar do WhatsApp Web."
+            )
         self.session.clear_editable(search_box)
         search_box.fill(target_name)
         self.session.sleep_ui_tick()
@@ -547,13 +548,42 @@ class SyncPlaywrightZapAPI:
                 continue
         return None
 
+    def _sidebar_search_box(self):
+        locator = self.session.find_visible_locator(
+            SEARCH_BOX_SELECTORS,
+            timeout_ms=self.config.action_timeout_ms,
+        )
+        if locator is None:
+            return None
+        if not self._is_sidebar_search_box(locator):
+            self.logger.warning("Ignorando campo de busca fora da sidebar do WhatsApp Web.")
+            return None
+        return locator
+
+    def _is_sidebar_search_box(self, locator) -> bool:
+        if self.session.locator_matches_ancestor(locator, "footer"):
+            return False
+        if self.session.locator_matches_ancestor(locator, "#main"):
+            return False
+        if self.session.locator_matches_ancestor(locator, "#side"):
+            return True
+
+        metadata = self.session.locator_text_metadata(locator)
+        label = " ".join(
+            str(metadata.get(key, ""))
+            for key in ("ariaLabel", "title")
+        ).casefold()
+        return "pesquisar" in label or "search" in label
+
     def _find_chat_row(self, target_name: str, *, exact_match: bool):
         deadline = time.monotonic() + (self.config.action_timeout_ms / 1000)
         normalized_target = target_name.casefold()
         target_key = self.parser.chat_match_key(target_name)
 
         while time.monotonic() < deadline:
-            for row in self.session.locators_for_any(CHAT_LIST_ITEM_SELECTORS):
+            for row in self.session.locators_for_any(CHAT_LIST_ITEM_SELECTORS)[:self._MAX_CHAT_ROW_SCAN]:
+                if time.monotonic() >= deadline:
+                    return None
                 chat = self.parser.parse_chat_summary(self.session.safe_evaluate(row, CHAT_SUMMARY_EVALUATOR))
                 if chat is None:
                     continue
