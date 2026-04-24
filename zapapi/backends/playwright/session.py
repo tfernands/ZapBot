@@ -49,7 +49,7 @@ class PlaywrightSession:
             headless=self.config.headless,
             args=list(self.config.browser_args),
             slow_mo=self.config.slow_mo,
-            user_agent=desktop_chrome["user_agent"],
+            user_agent=self.config.user_agent,
             viewport=desktop_chrome["viewport"],
         )
         self.context.set_default_timeout(self.config.action_timeout_ms)
