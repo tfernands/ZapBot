@@ -48,6 +48,6 @@ APPROVAL_SCHEMA: dict[str, Any] = {
 }
 
 # Tool sets used by SecurityPolicy to route allowlist checks.
-READ_TOOLS = frozenset({"whatsapp_inbox", "whatsapp_read", "whatsapp_search"})
+READ_TOOLS = frozenset({"whatsapp_find_chat", "whatsapp_inbox", "whatsapp_read", "whatsapp_search"})
 WRITE_TOOLS = frozenset({"whatsapp_send"})
 DEFAULT_ALLOWED_TOOLS = frozenset({"whatsapp_status"})

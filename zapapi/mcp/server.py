@@ -1,12 +1,13 @@
 """ZapAPI MCP Server — facade that composes the modular components.
 
-Exposes five agent-friendly tools:
+Exposes six agent-friendly tools:
 
 * ``whatsapp_status``  — diagnostics, auth state, session close
+* ``whatsapp_find_chat`` — resolve chats by name before reading
 * ``whatsapp_inbox``   — unified view of chats + recent messages (1 call)
 * ``whatsapp_read``    — read full history of a specific chat
 * ``whatsapp_send``    — send text or image
-* ``whatsapp_search``  — search messages by text across chats
+* ``whatsapp_search``  — search messages by text in explicit chats
 """
 
 from __future__ import annotations
@@ -221,6 +222,46 @@ class ZapAPIMCPRuntime:
                 annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
             ),
             ToolDefinition(
+                name="whatsapp_find_chat",
+                title="WhatsApp Find Chat",
+                description=(
+                    "Busca direta por chats/contatos/grupos pelo nome visivel. "
+                    "Use antes de whatsapp_read quando nao souber o nome exato. "
+                    "A correspondencia ignora acentos e emoji no titulo do WhatsApp. "
+                    "Quando houver ambiguidade, retorna ambiguous=true; nesses casos nao use "
+                    "automaticamente o primeiro resultado."
+                ),
+                input_schema=s.schema_for_tool(
+                    "whatsapp_find_chat",
+                    {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Parte do nome do chat, contato ou grupo.",
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 10,
+                                "description": "Numero maximo de chats retornados. Padrao: 10.",
+                            },
+                            "scroll_steps": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "default": 2,
+                                "description": "Scrolls curtos na sidebar antes da busca do WhatsApp. Padrao: 2.",
+                            },
+                        },
+                        "required": ["query"],
+                        "additionalProperties": False,
+                    },
+                ),
+                handler=h.whatsapp_find_chat,
+                annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
+            ),
+            ToolDefinition(
                 name="whatsapp_inbox",
                 title="WhatsApp Inbox",
                 description=(
@@ -346,9 +387,10 @@ class ZapAPIMCPRuntime:
                 name="whatsapp_search",
                 title="WhatsApp Search",
                 description=(
-                    "Busca mensagens contendo um texto em um ou mais chats. "
-                    "Se 'chats' nao for informado, busca em todos os chats visiveis. "
-                    "Retorna os hits com a mensagem completa e o chat de origem."
+                    "Busca mensagens contendo um texto somente nos chats informados. "
+                    "Nao faz varredura global para evitar timeouts; use whatsapp_find_chat "
+                    "para resolver o chat primeiro. Retorna os hits com a mensagem completa "
+                    "e o chat de origem."
                 ),
                 input_schema=s.schema_for_tool(
                     "whatsapp_search",
@@ -363,7 +405,8 @@ class ZapAPIMCPRuntime:
                             "chats": {
                                 "type": "array",
                                 "items": CHAT_REF_SCHEMA,
-                                "description": "Lista opcional de chats para limitar a busca.",
+                                "minItems": 1,
+                                "description": "Lista obrigatoria de chats para limitar a busca.",
                             },
                             "limit": {
                                 "type": "integer",
@@ -387,7 +430,7 @@ class ZapAPIMCPRuntime:
                                 ),
                             },
                         },
-                        "required": ["query"],
+                        "required": ["query", "chats"],
                         "additionalProperties": False,
                     },
                 ),
@@ -576,9 +619,10 @@ class ZapAPIMCPServer:
             },
             "instructions": (
                 "Use whatsapp_inbox para ver conversas recentes. "
+                "Use whatsapp_find_chat para resolver um contato/grupo pelo nome antes de ler. "
                 "Use whatsapp_read para historico completo de um chat. "
                 "Use whatsapp_send para enviar mensagens. "
-                "Use whatsapp_search para buscar por texto. "
+                "Use whatsapp_search para buscar por texto apenas em chats explicitos. "
                 "A autenticacao e transparente — todas as ferramentas autenticam automaticamente."
             ),
         }

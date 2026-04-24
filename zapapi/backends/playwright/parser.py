@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import replace
 from datetime import datetime
 from typing import Sequence
@@ -35,6 +36,35 @@ class WhatsAppParser:
             timestamp=payload.get("timestamp"),
             unread_count=int(payload.get("unread_count") or 0),
         )
+
+    @staticmethod
+    def chat_match_key(value: str | None) -> str:
+        """Normalize chat names for matching user input against WhatsApp labels.
+
+        WhatsApp contact titles often include emoji, variation selectors, or
+        accents. Agents usually ask for the human name, so matching should not
+        fail because the visible title is "Vitoria 💚" and the target is
+        "Vitoria".
+        """
+        if not value:
+            return ""
+
+        normalized = unicodedata.normalize("NFKD", value)
+        parts: list[str] = []
+        last_was_space = False
+        for char in normalized:
+            category = unicodedata.category(char)
+            if category.startswith("M") or category in {"Cf", "So", "Sk"}:
+                continue
+            if char.isalnum():
+                parts.append(char.casefold())
+                last_was_space = False
+                continue
+            if char.isspace() and not last_was_space:
+                parts.append(" ")
+                last_was_space = True
+
+        return "".join(parts).strip()
 
     @classmethod
     def parse_message(cls, chat: ChatRef, payload: dict | None) -> ChatMessage | None:

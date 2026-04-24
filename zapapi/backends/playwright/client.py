@@ -123,12 +123,78 @@ class SyncPlaywrightZapAPI:
 
         return chats
 
-    def select_chat(self, target: str | ChatRef, exact_match: bool = True) -> ChatRef:
-        target_name = target.name if isinstance(target, ChatRef) else target
+    def find_chats(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        scroll_steps: int = 2,
+    ) -> list[ChatSummary]:
+        """Find chats by visible name using WhatsApp search and local matching."""
+        target_key = self.parser.chat_match_key(query)
+        if not target_key:
+            return []
+
+        matches: list[ChatSummary] = []
+        seen_names: set[str] = set()
+
+        def _add_if_match(chat: ChatSummary | None) -> None:
+            if chat is None:
+                return
+            name_key = self.parser.chat_match_key(chat.name)
+            if target_key not in name_key and name_key not in target_key:
+                return
+            dedupe_key = name_key or chat.name.casefold()
+            if dedupe_key in seen_names:
+                return
+            seen_names.add(dedupe_key)
+            matches.append(chat)
+
+        for chat in self.list_chats(scroll_steps=scroll_steps):
+            _add_if_match(chat)
+            if len(matches) >= limit:
+                return matches
+
+        search_box = self.session.find_visible_locator(
+            SEARCH_BOX_SELECTORS,
+            timeout_ms=self.config.action_timeout_ms,
+        )
+        if search_box is None:
+            return matches
+
+        self.session.clear_editable(search_box)
+        search_box.fill(query)
+        self.session.sleep_ui_tick()
 
         try:
-            if self.current_chat().name == target_name:
-                return ChatRef(name=target_name)
+            deadline = time.monotonic() + (self.config.action_timeout_ms / 1000)
+            while time.monotonic() < deadline and len(matches) < limit:
+                before_count = len(matches)
+                for row in self.session.locators_for_any(CHAT_LIST_ITEM_SELECTORS):
+                    chat = self.parser.parse_chat_summary(
+                        self.session.safe_evaluate(row, CHAT_SUMMARY_EVALUATOR)
+                    )
+                    _add_if_match(chat)
+                    if len(matches) >= limit:
+                        break
+                if len(matches) != before_count:
+                    continue
+                self.session.require_page().wait_for_timeout(self.config.poll_interval_ms)
+        finally:
+            self.session.clear_editable(search_box)
+
+        return matches
+
+    def select_chat(self, target: str | ChatRef, exact_match: bool = True) -> ChatRef:
+        target_name = target.name if isinstance(target, ChatRef) else target
+        target_key = self.parser.chat_match_key(target_name)
+
+        try:
+            current = self.current_chat()
+            if current.name == target_name or (
+                target_key and self.parser.chat_match_key(current.name) == target_key
+            ):
+                return current
         except NoOpenChatException:
             pass
 
@@ -137,7 +203,7 @@ class SyncPlaywrightZapAPI:
             row.click()
             self.session.sleep_ui_tick()
             chat = self.current_chat()
-            if exact_match and chat.name != target_name:
+            if exact_match and not self._chat_name_matches(chat.name, target_name):
                 raise ChatNotFoundException(target_name, message=f"Chat aberto diverge do alvo: {chat.name}")
             return chat
 
@@ -159,7 +225,7 @@ class SyncPlaywrightZapAPI:
         self.session.sleep_ui_tick()
 
         chat = self.current_chat()
-        if exact_match and chat.name != target_name:
+        if exact_match and not self._chat_name_matches(chat.name, target_name):
             raise ChatNotFoundException(target_name, message=f"Chat aberto diverge do alvo: {chat.name}")
         return chat
 
@@ -484,6 +550,7 @@ class SyncPlaywrightZapAPI:
     def _find_chat_row(self, target_name: str, *, exact_match: bool):
         deadline = time.monotonic() + (self.config.action_timeout_ms / 1000)
         normalized_target = target_name.casefold()
+        target_key = self.parser.chat_match_key(target_name)
 
         while time.monotonic() < deadline:
             for row in self.session.locators_for_any(CHAT_LIST_ITEM_SELECTORS):
@@ -492,14 +559,26 @@ class SyncPlaywrightZapAPI:
                     continue
 
                 normalized_name = chat.name.casefold()
+                name_key = self.parser.chat_match_key(chat.name)
                 if exact_match and normalized_name == normalized_target:
                     return row
+                if exact_match and target_key and name_key == target_key:
+                    return row
                 if not exact_match and normalized_target in normalized_name:
+                    return row
+                if not exact_match and target_key and target_key in name_key:
                     return row
 
             self.session.require_page().wait_for_timeout(self.config.poll_interval_ms)
 
         return None
+
+    def _chat_name_matches(self, actual_name: str, target_name: str) -> bool:
+        if actual_name == target_name:
+            return True
+        actual_key = self.parser.chat_match_key(actual_name)
+        target_key = self.parser.chat_match_key(target_name)
+        return bool(actual_key and target_key and actual_key == target_key)
 
     def _wait_for_outbound_text(
         self,

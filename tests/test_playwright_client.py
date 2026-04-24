@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from zapapi.backends.playwright.client import SyncPlaywrightZapAPI
+from zapapi.backends.playwright.parser import WhatsAppParser
 from zapapi.config import ZapAPIConfig
 from zapapi.errors import WhatsAppWebTimeoutException
 from zapapi.models import AuthState, AuthStatus, ChatRef, ChatTextMessage, MessageDirection
@@ -142,6 +143,14 @@ class PlaywrightClientSendTextTests(unittest.TestCase):
 
         with self.assertRaises(WhatsAppWebTimeoutException):
             client.send_text(chat, "teste que nao aparece")
+
+
+class WhatsAppParserChatMatchTests(unittest.TestCase):
+    def test_chat_match_key_ignores_accents_and_emoji(self) -> None:
+        self.assertEqual(
+            WhatsAppParser.chat_match_key("Vitória 💚"),
+            WhatsAppParser.chat_match_key("vitoria"),
+        )
 
 
 if __name__ == "__main__":

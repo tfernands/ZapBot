@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from zapapi import ChatRef, ZapAPI
+from zapapi.backends.playwright.parser import WhatsAppParser
 
 from .errors import ToolInputError
 from .options import ServerOptions
@@ -17,12 +18,13 @@ LOGGER = logging.getLogger(__name__)
 class ToolHandlers:
     """Implements the business logic for each MCP tool.
 
-    Five tools designed for agent consumption:
+    Six tools designed for agent consumption:
     - whatsapp_status  — diagnostics, auth, session management
+    - whatsapp_find_chat — find/resolve chats by name
     - whatsapp_inbox   — unified view of chats + recent messages
     - whatsapp_read    — read history of a specific chat
     - whatsapp_send    — send text or image to a chat
-    - whatsapp_search  — search messages by text across chats
+    - whatsapp_search  — search messages by text in explicit chats
     """
 
     def __init__(
@@ -58,6 +60,61 @@ class ToolHandlers:
             "write_chat_allowlist": sorted(write_list) if write_list else None,
             "unrestricted": read_list is None and write_list is None,
         }
+        return result
+
+    # -- whatsapp_find_chat --------------------------------------------------
+
+    def whatsapp_find_chat(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        query = ArgumentParser.required_string(arguments, "query")
+        limit = ArgumentParser.optional_int(arguments, "limit", minimum=1, default=10)
+        scroll_steps = ArgumentParser.optional_int(
+            arguments, "scroll_steps", minimum=0, default=2,
+        )
+
+        LOGGER.debug(
+            "whatsapp_find_chat: query='%s' limit=%d scroll_steps=%d",
+            query, limit, scroll_steps,
+        )
+
+        api = self._get_api()
+        chats = api.chats.find(query, limit=limit, scroll_steps=scroll_steps)
+
+        visible_chats = self._security.filter_visible_chats(chats)
+        query_key = WhatsAppParser.chat_match_key(query)
+        exact_matches = [
+            chat
+            for chat in visible_chats
+            if WhatsAppParser.chat_match_key(chat.name) == query_key
+        ]
+
+        result: dict[str, Any] = {
+            "query": query,
+            "count": len(visible_chats),
+            "chats": serialize(visible_chats),
+        }
+        if len(exact_matches) == 1:
+            result["resolved"] = True
+            result["ambiguous"] = False
+            result["resolved_chat"] = serialize(exact_matches[0])
+        elif len(exact_matches) > 1:
+            result["resolved"] = False
+            result["ambiguous"] = True
+            result["ambiguity_reason"] = (
+                "Mais de um chat tem o mesmo nome apos normalizacao de acentos/emoji. "
+                "Nao use automaticamente o primeiro resultado; desambigue pelo preview, timestamp ou nome completo."
+            )
+        elif len(visible_chats) > 1:
+            result["resolved"] = False
+            result["ambiguous"] = True
+            result["ambiguity_reason"] = (
+                "A busca retornou multiplos candidatos parciais e nenhum match exato normalizado. "
+                "Refine a query antes de chamar whatsapp_read, whatsapp_send ou whatsapp_search."
+            )
+        else:
+            result["resolved"] = len(visible_chats) == 1
+            result["ambiguous"] = False
+            result["resolved_chat"] = serialize(visible_chats[0]) if visible_chats else None
+
         return result
 
     # -- whatsapp_inbox ------------------------------------------------------
@@ -182,6 +239,10 @@ class ToolHandlers:
     def whatsapp_search(self, arguments: dict[str, Any]) -> dict[str, Any]:
         query = ArgumentParser.required_string(arguments, "query")
         chats = ArgumentParser.optional_chat_list(arguments, "chats")
+        if chats is None:
+            raise ToolInputError(
+                "Informe 'chats' para limitar a busca. Use whatsapp_find_chat primeiro para resolver o chat pelo nome."
+            )
         limit = ArgumentParser.optional_int(arguments, "limit", minimum=1, default=20)
         scroll_steps = ArgumentParser.optional_int(
             arguments, "scroll_steps", minimum=0, default=3,

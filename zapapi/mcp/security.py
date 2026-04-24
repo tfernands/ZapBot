@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from zapapi import ChatRef
+from zapapi.backends.playwright.parser import WhatsAppParser
 
 from .errors import ToolAccessError, ToolInputError
 from .options import ServerOptions
@@ -93,7 +94,7 @@ class SecurityPolicy:
     def is_chat_accessible(self, name: str, allowlist: set[str] | None) -> bool:
         if allowlist is None:
             return True
-        return name.casefold() in allowlist
+        return WhatsAppParser.chat_match_key(name) in allowlist
 
     # -- Validation (called once at init) ------------------------------------
 
@@ -229,7 +230,7 @@ class SecurityPolicy:
         names = [v.strip() for v in values if v.strip()]
         if any(name.upper() == "ALL" for name in names):
             return None
-        return {name.casefold() for name in names}
+        return {WhatsAppParser.chat_match_key(name) for name in names}
 
     @staticmethod
     def _normalized_image_dirs(values: tuple[Path, ...] | None) -> tuple[Path, ...] | None:
@@ -239,11 +240,11 @@ class SecurityPolicy:
 
     @staticmethod
     def _is_chat_target_allowed(value: str | ChatRef | Any, allowed_names: set[str]) -> bool:
-        return SecurityPolicy._chat_name(value).casefold() in allowed_names
+        return WhatsAppParser.chat_match_key(SecurityPolicy._chat_name(value)) in allowed_names
 
     @staticmethod
     def _is_chat_name_allowed(name: str, allowed_names: set[str]) -> bool:
-        return name.casefold() in allowed_names
+        return WhatsAppParser.chat_match_key(name) in allowed_names
 
     @staticmethod
     def _chat_name(value: str | ChatRef | Any) -> str:
